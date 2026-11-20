@@ -1,0 +1,2555 @@
+#!/usr/bin/env python3
+import gi
+import os
+import re
+import subprocess
+from subprocess import Popen, PIPE
+
+gi.require_version('Gtk', '3.0')
+from gi.repository import Gtk, GdkPixbuf, GLib, Gdk
+
+class RiceEditorApp(Gtk.Window):
+    def __init__(self):
+        Gtk.Window.__init__(self, title=f"Rice Editor: {self.get_current_theme()}")
+        self.set_position(Gtk.WindowPosition.CENTER)
+        self.current_theme = self.get_current_theme()
+
+        # Main container
+        main_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        main_box.set_margin_start(10)
+        main_box.set_margin_end(20)
+        main_box.set_margin_top(20)
+        main_box.set_margin_bottom(20)
+        self.add(main_box)
+
+        # Side menu
+        sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        sidebar.set_border_width(10)
+        sidebar.set_size_request(200, -1)  # Fixed width for the side menu
+
+        # Load SVG logo
+        logo_path = os.path.expanduser('~/.config/bspwm/config/assets/profile.png')
+        try:
+            logo_pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(logo_path, 130, 130, True)
+            logo_image = Gtk.Image.new_from_pixbuf(logo_pixbuf)
+            sidebar.pack_start(logo_image, False, False, 10)
+        except GLib.Error as e:
+            print(f"Error loading logo: {e}")
+
+        # Container for menu buttons
+        menu_options = [
+            "Rice Options",
+            "Tuning",
+            "General Options",
+            "Help"
+        ]
+
+        for option in menu_options:
+            button = Gtk.Button(label=option)
+            button.set_name(option.lower().replace(" ", "_"))
+            sidebar.pack_start(button, False, False, 0)
+
+        # Main content area
+        self.content_stack = Gtk.Stack()
+        self.content_stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+
+        # Header
+        header = Gtk.Label()
+        header.set_markup(f"<big><b> ƒoxglove : </b> <span foreground='yellow'>{self.current_theme}</span></big>")
+        header.set_margin_top(20)
+        header.set_margin_bottom(20)
+
+        # Content for each option
+        rice_options_content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        notebook = Gtk.Notebook()
+        tabs = ["  Bspwm", "󰤺  Picom", "  Terminal", "  Misc"]
+
+        for tab_name in tabs:
+            label = Gtk.Label(label=tab_name)
+            content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            content.set_border_width(10)
+
+            if tab_name == "  Bspwm":
+                # Border Width Configuration
+                border_width_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+                border_width_label = Gtk.Label()
+                border_width_label.set_markup("Border Width <i><small>(0-9)</small></i>")
+                border_width_label.set_halign(Gtk.Align.START)
+
+                self.border_width_entry = Gtk.Entry()
+                self.border_width_entry.set_width_chars(5)
+                self.border_width_entry.set_max_length(1)
+                self.border_width_entry.set_input_purpose(Gtk.InputPurpose.DIGITS)
+
+                # Set initial value
+                initial_border_width = self.get_border_width()
+                self.border_width_entry.set_text(str(initial_border_width))
+
+                # Validation for numeric input
+                self.border_width_entry.connect("insert-text", self.on_border_entry_insert)
+
+                border_width_apply_button = Gtk.Button(label="Apply")
+                border_width_apply_button.connect("clicked", self.on_apply_border_width)
+
+                border_width_box.pack_start(border_width_label, True, True, 0)
+                border_width_box.pack_end(border_width_apply_button, False, False, 0)
+                border_width_box.pack_end(self.border_width_entry, False, False, 0)
+
+                content.pack_start(border_width_box, False, False, 7)
+
+                # Normal Border Color Configuration
+                normal_border_color_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+                normal_border_color_label = Gtk.Label(label="Normal border color")
+                normal_border_color_label.set_halign(Gtk.Align.START)
+
+                # Color Picker Button
+                color_picker_button = Gtk.ColorButton()
+                color_picker_button.set_title("Select Normal Border Color")
+
+                self.normal_border_color_entry = Gtk.Entry()
+                self.normal_border_color_entry.set_width_chars(8)
+                self.normal_border_color_entry.set_max_length(7)
+
+                # Set initial value
+                initial_normal_border_color = self.get_border_color('NORMAL_BC')
+                self.normal_border_color_entry.set_text(initial_normal_border_color)
+                normal_initial_color = Gdk.RGBA()
+                normal_initial_color.parse(initial_normal_border_color)
+                color_picker_button.set_rgba(normal_initial_color)
+
+                # Connect color picker to entry
+                color_picker_button.connect("color-set", self.on_color_picked, self.normal_border_color_entry)
+
+                # Validation for hex color
+                self.normal_border_color_entry.connect("insert-text", self.on_color_entry_insert)
+
+                normal_border_color_apply_button = Gtk.Button(label="Apply")
+                normal_border_color_apply_button.connect("clicked", self.on_apply_border_color, 'NORMAL_BC', 'normal_border_color')
+
+                normal_border_color_box.pack_start(normal_border_color_label, True, True, 0)
+                normal_border_color_box.pack_end(normal_border_color_apply_button, False, False, 0)
+                normal_border_color_box.pack_end(self.normal_border_color_entry, False, False, 0)
+                normal_border_color_box.pack_end(color_picker_button, False, False, 0)
+
+                content.pack_start(normal_border_color_box, False, False, 7)
+
+                # Focused Border Color Configuration
+                focused_border_color_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+                focused_border_color_label = Gtk.Label(label="Focused border color")
+                focused_border_color_label.set_halign(Gtk.Align.START)
+
+                # Color Picker Button
+                focused_color_picker_button = Gtk.ColorButton()
+                focused_color_picker_button.set_title("Select Focused Border Color")
+
+                self.focused_border_color_entry = Gtk.Entry()
+                self.focused_border_color_entry.set_width_chars(8)
+                self.focused_border_color_entry.set_max_length(7)
+
+                # Set initial value
+                initial_focused_border_color = self.get_border_color('FOCUSED_BC')
+                self.focused_border_color_entry.set_text(initial_focused_border_color)
+                focused_initial_color = Gdk.RGBA()
+                focused_initial_color.parse(initial_focused_border_color)
+                focused_color_picker_button.set_rgba(focused_initial_color)
+
+                # Connect color picker to entry
+                focused_color_picker_button.connect("color-set", self.on_color_picked, self.focused_border_color_entry)
+
+                # Validation for hex color
+                self.focused_border_color_entry.connect("insert-text", self.on_color_entry_insert)
+
+                focused_border_color_apply_button = Gtk.Button(label="Apply")
+                focused_border_color_apply_button.connect("clicked", self.on_apply_border_color, 'FOCUSED_BC', 'focused_border_color')
+
+                focused_border_color_box.pack_start(focused_border_color_label, True, True, 0)
+                focused_border_color_box.pack_end(focused_border_color_apply_button, False, False, 0)
+                focused_border_color_box.pack_end(self.focused_border_color_entry, False, False, 0)
+                focused_border_color_box.pack_end(focused_color_picker_button, False, False, 0)
+
+                content.pack_start(focused_border_color_box, False, False, 7)
+
+            # Within the __init__ method, in the notebook section where the Picom tab is located
+            elif tab_name == "󰤺  Picom":
+                # Corner Radius Configuration
+                corner_radius_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+                corner_radius_label = Gtk.Label()
+                corner_radius_label.set_markup("Corner Radius <i><small>(0-99)</small></i>")
+                corner_radius_label.set_halign(Gtk.Align.START)
+
+                self.corner_radius_entry = Gtk.Entry()
+                self.corner_radius_entry.set_width_chars(5)
+                self.corner_radius_entry.set_max_length(2)
+                self.corner_radius_entry.set_input_purpose(Gtk.InputPurpose.DIGITS)
+
+                # Set initial value
+                initial_corner_radius = self.get_corner_radius()
+                self.corner_radius_entry.set_text(str(initial_corner_radius))
+
+                # Validation for numeric input
+                self.corner_radius_entry.connect("insert-text", self.on_corner_radius_entry_insert)
+
+                corner_radius_apply_button = Gtk.Button(label="Apply")
+                corner_radius_apply_button.connect("clicked", self.on_apply_corner_radius)
+
+                corner_radius_box.pack_start(corner_radius_label, True, True, 0)
+                corner_radius_box.pack_end(corner_radius_apply_button, False, False, 0)
+                corner_radius_box.pack_end(self.corner_radius_entry, False, False, 0)
+
+                content.pack_start(corner_radius_box, False, False, 7)
+
+                # Shadows Configuration
+                shadows_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+                shadows_label = Gtk.Label(label="Shadows")
+                shadows_label.set_halign(Gtk.Align.START)
+
+                self.shadows_switch = Gtk.Switch()
+
+                # Set initial value
+                initial_shadows_state = self.get_shadows_state()
+                self.shadows_switch.set_active(initial_shadows_state)
+
+                # Connect switch to handler
+                self.shadows_switch.connect("state-set", self.on_shadows_switch_toggled)
+
+                shadows_box.pack_start(shadows_label, True, True, 0)
+                shadows_box.pack_end(self.shadows_switch, False, False, 0)
+
+                content.pack_start(shadows_box, False, False, 7)
+
+                # Shadow Color Configuration
+                shadow_color_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+                shadow_color_label = Gtk.Label(label="Shadow Color")
+                shadow_color_label.set_halign(Gtk.Align.START)
+
+                # Color Picker Button
+                shadow_color_picker_button = Gtk.ColorButton()
+                shadow_color_picker_button.set_title("Select Shadow Color")
+
+                self.shadow_color_entry = Gtk.Entry()
+                self.shadow_color_entry.set_width_chars(8)
+                self.shadow_color_entry.set_max_length(7)
+
+                # Set initial value
+                initial_shadow_color = self.get_shadow_color()
+                self.shadow_color_entry.set_text(initial_shadow_color)
+                shadow_initial_color = Gdk.RGBA()
+                shadow_initial_color.parse(initial_shadow_color)
+                shadow_color_picker_button.set_rgba(shadow_initial_color)
+
+                # Connect color picker to entry
+                shadow_color_picker_button.connect("color-set", self.on_color_picked, self.shadow_color_entry)
+
+                # Validation for hex color
+                self.shadow_color_entry.connect("insert-text", self.on_color_entry_insert)
+
+                shadow_color_apply_button = Gtk.Button(label="Apply")
+                shadow_color_apply_button.connect("clicked", self.on_apply_shadow_color)
+
+                shadow_color_box.pack_start(shadow_color_label, True, True, 0)
+                shadow_color_box.pack_end(shadow_color_apply_button, False, False, 0)
+                shadow_color_box.pack_end(self.shadow_color_entry, False, False, 0)
+                shadow_color_box.pack_end(shadow_color_picker_button, False, False, 0)
+
+                content.pack_start(shadow_color_box, False, False, 7)
+
+                # Fadding Effect Configuration
+                fadding_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+                fadding_label = Gtk.Label(label="Fadding Effect")
+                fadding_label.set_halign(Gtk.Align.START)
+
+                self.fadding_switch = Gtk.Switch()
+
+                # Set initial value
+                initial_fadding_state = self.get_fadding_state()
+                self.fadding_switch.set_active(initial_fadding_state)
+
+                # Connect switch to handler
+                self.fadding_switch.connect("state-set", self.on_fadding_switch_toggled)
+
+                fadding_box.pack_start(fadding_label, True, True, 0)
+                fadding_box.pack_end(self.fadding_switch, False, False, 0)
+
+                content.pack_start(fadding_box, False, False, 7)
+
+                # Blur Effect Configuration
+                blur_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+                blur_label = Gtk.Label(label="Blur Effect")
+                blur_label.set_halign(Gtk.Align.START)
+
+                self.blur_switch = Gtk.Switch()
+
+                # Establecer valor inicial
+                initial_blur_state = self.get_blur_state()
+                self.blur_switch.set_active(initial_blur_state)
+
+                # Conectar switch a su manejador
+                self.blur_switch.connect("state-set", self.on_blur_switch_toggled)
+
+                blur_box.pack_start(blur_label, True, True, 0)
+                blur_box.pack_end(self.blur_switch, False, False, 0)
+
+                content.pack_start(blur_box, False, False, 7)
+
+                # Animations Configuration
+                animations_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+                animations_label = Gtk.Label(label="Animations")
+                animations_label.set_halign(Gtk.Align.START)
+
+                self.animations_switch = Gtk.Switch()
+
+                # Set initial value
+                initial_animations_state = self.get_animations_state()
+                self.animations_switch.set_active(initial_animations_state)
+
+                # Connect switch to handler
+                self.animations_switch.connect("state-set", self.on_animations_switch_toggled)
+
+                animations_box.pack_start(animations_label, True, True, 0)
+                animations_box.pack_end(self.animations_switch, False, False, 0)
+
+                content.pack_start(animations_box, False, False, 7)
+
+            elif tab_name == "  Terminal":
+				# Transparency Header
+                transparency_label = Gtk.Label()
+                transparency_label.set_markup("<small>The blur effect only affects terminals with transparency. 1.0 means\nno transparency</small>")
+                transparency_label.set_halign(Gtk.Align.START)
+
+                content.pack_start(transparency_label, False, False, 7)
+
+                # Terminal Transparency Configuration
+                term_opacity_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+                term_opacity_label = Gtk.Label()
+                term_opacity_label.set_markup("Terminal Transparency <i><small>(Range 0.1 - 1.0)</small></i>")
+                term_opacity_label.set_halign(Gtk.Align.START)
+
+                self.term_opacity_entry = Gtk.Entry()
+                self.term_opacity_entry.set_width_chars(5)
+                self.term_opacity_entry.set_max_length(4)
+
+                # Set initial value
+                initial_term_opacity = self.get_terminal_opacity()
+                self.term_opacity_entry.set_text(str(initial_term_opacity))
+
+                # Validation for numeric input
+                self.term_opacity_entry.connect("insert-text", self.on_terminal_opacity_insert)
+
+                term_opacity_apply_button = Gtk.Button(label="Apply")
+                term_opacity_apply_button.connect("clicked", self.on_apply_terminal_opacity)
+
+                term_opacity_box.pack_start(term_opacity_label, True, True, 0)
+                term_opacity_box.pack_end(term_opacity_apply_button, False, False, 0)
+                term_opacity_box.pack_end(self.term_opacity_entry, False, False, 0)
+
+                content.pack_start(term_opacity_box, False, False, 10)
+
+                # Encabezado Alacritty
+                alacritty_label = Gtk.Label()
+                alacritty_label.set_markup("<small>The following 2 options will change the appearance for both terminals,\nAlacritty and Kitty</small>")
+                alacritty_label.set_halign(Gtk.Align.START)
+
+                content.pack_start(alacritty_label, False, False, 7)
+
+                # Font Size Configuration
+                font_size_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+                font_size_label = Gtk.Label(label="Font Size")
+                font_size_label.set_halign(Gtk.Align.START)
+
+                self.font_size_entry = Gtk.Entry()
+                self.font_size_entry.set_width_chars(5)
+                self.font_size_entry.set_max_length(2)
+                self.font_size_entry.set_input_purpose(Gtk.InputPurpose.DIGITS)
+
+                # Set initial value
+                initial_font_size = self.get_font_size()
+                self.font_size_entry.set_text(str(initial_font_size))
+
+                # Validation for numeric input
+                self.font_size_entry.connect("insert-text", self.on_font_size_insert)
+
+                font_size_apply_button = Gtk.Button(label="Apply")
+                font_size_apply_button.connect("clicked", self.on_apply_font_size)
+
+                font_size_box.pack_start(font_size_label, True, True, 0)
+                font_size_box.pack_end(font_size_apply_button, False, False, 0)
+                font_size_box.pack_end(self.font_size_entry, False, False, 0)
+
+                content.pack_start(font_size_box, False, False, 7)
+
+                # Font Name Configuration
+                font_name_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+                font_name_label = Gtk.Label(label="Font Name")
+                font_name_label.set_halign(Gtk.Align.START)
+
+                # Button to open font chooser dialog
+                font_chooser_button = Gtk.Button(label="Select")
+                font_chooser_button.connect("clicked", self.on_font_chooser_clicked)
+
+                # Entry for manual font name input
+                self.font_name_entry = Gtk.Entry()
+                self.font_name_entry.set_width_chars(20)
+
+                # Set initial value
+                initial_font_name = self.get_font_name()
+                self.font_name_entry.set_text(initial_font_name)
+
+                # Apply button
+                font_name_apply_button = Gtk.Button(label="Apply")
+                font_name_apply_button.connect("clicked", self.on_apply_font_name)
+
+                font_name_box.pack_start(font_name_label, True, True, 0)
+                font_name_box.pack_end(font_name_apply_button, False, False, 0)
+                font_name_box.pack_end(self.font_name_entry, False, False, 0)
+                font_name_box.pack_end(font_chooser_button, False, False, 0)
+
+                content.pack_start(font_name_box, False, False, 7)
+
+            elif tab_name == "  Misc":
+                # Wall Engine Configuration
+                wall_engine_label = Gtk.Label(label="Wall Engine")
+                wall_engine_label.set_halign(Gtk.Align.START)
+
+                # Dropdown for Wall Engine options
+                self.wall_engine_combo = Gtk.ComboBoxText()
+                self.wall_engine_combo.append("Theme", "Default")
+                self.wall_engine_combo.append("CustomDir", "Custom Dir")
+                self.wall_engine_combo.append("CustomImage", "Custom Image")
+                self.wall_engine_combo.append("CustomAnimated", "Custom Animated")
+                self.wall_engine_combo.append("Slideshow", "SlideShow")
+
+                # Set initial value
+                initial_engine = self.get_wall_engine()
+                self.wall_engine_combo.set_active_id(initial_engine)
+                self.wall_engine_combo.connect("changed", self.on_wall_engine_changed)
+
+                # Container for dynamic options
+                self.wall_engine_options_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+
+                # Pack components
+                content.pack_start(wall_engine_label, False, False, 7)
+                content.pack_start(self.wall_engine_combo, False, False, 10)
+                content.pack_start(self.wall_engine_options_box, False, False, 7)
+
+                # Initial display based on current value
+                self.update_wall_engine_options(initial_engine)
+
+            else:
+                # A temporary label to display the content of each tab
+                placeholder = Gtk.Label(label=f"Conifg {tab_name}")
+                content.pack_start(placeholder, True, True, 0)
+
+            notebook.append_page(content, label)
+
+        rice_options_content.pack_start(notebook, True, True, 0)
+
+        # Content for General Options
+        general_frame = Gtk.Frame()
+        general_frame.set_shadow_type(Gtk.ShadowType.IN)
+
+        general_options_content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        general_label = Gtk.Label(label="These options will affect all themes and the environment.")
+        general_label.set_margin_bottom(10)
+        general_label.set_margin_top(10)
+        general_options_content.pack_start(general_label, False, False, 0)
+
+        # Picom Backend Configuration
+        picom_backend_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+        picom_backend_label = Gtk.Label(label="Picom Backend")
+        picom_backend_label.set_halign(Gtk.Align.START)
+
+        # ComboBox for backend options
+        self.picom_backend_combo = Gtk.ComboBoxText()
+        self.picom_backend_combo.append("xrender", "xrender")
+        self.picom_backend_combo.append("glx", "glx")
+        self.picom_backend_combo.append("egl", "egl")
+
+        # Set initial value
+        initial_backend = self.get_picom_backend()
+        self.picom_backend_combo.set_active_id(initial_backend)
+
+        # Connect the change event
+        self.picom_backend_combo.connect("changed", self.on_apply_picom_backend)
+
+        picom_backend_box.pack_start(picom_backend_label, True, True, 10)
+        picom_backend_box.pack_end(self.picom_backend_combo, False, False, 10)
+
+        general_options_content.pack_start(picom_backend_box, False, False, 7)
+
+        # vSync settings
+        vsync_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+        vsync_label = Gtk.Label(label="vSync")
+        vsync_label.set_halign(Gtk.Align.START)
+
+        self.vsync_switch = Gtk.Switch()
+
+        # Set initial value
+        initial_vsync_state = self.get_vsync_state()
+        self.vsync_switch.set_active(initial_vsync_state)
+
+        # Connect the change event
+        self.vsync_switch.connect("state-set", self.on_vsync_switch_toggled)
+
+        vsync_box.pack_start(vsync_label, True, True, 10)
+        vsync_box.pack_end(self.vsync_switch, False, False, 10)
+
+        general_options_content.pack_start(vsync_box, False, False, 7)
+
+        # Bspwm Window Gap Configuration
+        window_gap_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+        window_gap_label = Gtk.Label(label="Bspwm Window Gap")
+        window_gap_label.set_halign(Gtk.Align.START)
+
+        self.window_gap_entry = Gtk.Entry()
+        self.window_gap_entry.set_width_chars(5)
+        self.window_gap_entry.set_max_length(2)
+        self.window_gap_entry.set_input_purpose(Gtk.InputPurpose.DIGITS)
+
+        # Set initial value
+        initial_window_gap = self.get_window_gap()
+        self.window_gap_entry.set_text(str(initial_window_gap))
+
+        # Validation to allow only numbers between 0 and 20
+        self.window_gap_entry.connect("insert-text", self.on_window_gap_entry_insert)
+
+        apply_button = Gtk.Button(label="Apply")
+        apply_button.connect("clicked", self.on_apply_window_gap)
+
+        window_gap_box.pack_start(window_gap_label, True, True, 10)
+        window_gap_box.pack_end(apply_button, False, False, 10)
+        window_gap_box.pack_end(self.window_gap_entry, False, False, 0)
+
+        general_options_content.pack_start(window_gap_box, False, False, 7)
+
+        general_frame.add(general_options_content)  # Add the content to the Gtk.Frame
+
+        # Pixel-Art on Terminal Configuration
+        pixel_art_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+        pixel_art_label = Gtk.Label(label="Pixel-Art on Terminal")
+        pixel_art_label.set_halign(Gtk.Align.START)
+
+        self.pixel_art_switch = Gtk.Switch()
+
+        # Set initial value
+        initial_pixel_art_state = self.get_pixel_art_state()
+        self.pixel_art_switch.set_active(initial_pixel_art_state)
+
+        # Connect the change event
+        self.pixel_art_switch.connect("state-set", self.on_pixel_art_switch_toggled)
+
+        pixel_art_box.pack_start(pixel_art_label, True, True, 10)
+        pixel_art_box.pack_end(self.pixel_art_switch, False, False, 10)
+
+        general_options_content.pack_start(pixel_art_box, False, False, 7)
+
+        # fzf-tab completion configuration
+        fzf_tab_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+        fzf_tab_label = Gtk.Label(label="Disable fzf-tab completion")
+        fzf_tab_label.set_halign(Gtk.Align.START)
+
+        self.fzf_tab_switch = Gtk.Switch()
+
+        # Set initial value
+        initial_fzf_tab_state = self.get_fzf_tab_state()
+        self.fzf_tab_switch.set_active(initial_fzf_tab_state)
+
+        # Connect the change event
+        self.fzf_tab_switch.connect("state-set", self.on_fzf_tab_switch_toggled)
+
+        fzf_tab_box.pack_start(fzf_tab_label, True, True, 10)
+        fzf_tab_box.pack_end(self.fzf_tab_switch, False, False, 10)
+
+        general_options_content.pack_start(fzf_tab_box, False, False, 7)
+
+        # Help content
+        help_frame = Gtk.Frame()  # Create a Gtk.Frame
+        help_frame.set_shadow_type(Gtk.ShadowType.IN)  # Configure the border shadow type
+
+        help_content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        help_label = Gtk.Label(label="If you open RiceEditor in a theme, and switch to another\ntheme, you will continue editing the theme you were in before.\nYou need to close RiceEditor and open it again.\nThe name of the theme you are editing is in yellow letters.\nBe careful!!")
+        help_content.pack_start(help_label, True, True, 10)
+
+        help_frame.add(help_content)  # Add the content to the Gtk.Frame
+
+        # Tuning content
+        tuning_frame = Gtk.Frame()  # Create a Gtk.Frame
+        tuning_frame.set_shadow_type(Gtk.ShadowType.IN)  # Configure the border shadow type
+
+        tuning_content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        help_label = Gtk.Label(label="TEST you open RiceEditor in a theme, and switch to another\ntheme, you will continue editing the theme you were in before.\nYou need to close RiceEditor and open it again.\nThe name of the theme you are editing is in yellow letters.\nBe careful!!")        
+        tuning_content.pack_start(help_label, True, True, 10)
+
+        # Content for each option
+        tuning_options_content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        notebook = Gtk.Notebook()
+        tabs = ["󰻠  CPU", "  GPU", "󱐋  Power"]
+
+        for tab_name in tabs:
+            label = Gtk.Label(label=tab_name)
+            tuning_content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            tuning_content.set_border_width(10)
+
+            if tab_name == "󰻠  CPU":
+                ## P-State configuration
+                pstate_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+                pstate_label = Gtk.Label(label="AMD P-State Driver")
+                pstate_label.set_halign(Gtk.Align.START)
+
+                # Dropdown for P-State options
+                self.pstate_combo = Gtk.ComboBoxText()
+                self.pstate_combo.append("passive", "passive")
+                self.pstate_combo.append("guided", "guided")
+                self.pstate_combo.append("active", "active")
+
+                # Set initial value
+                initial_pstate_state = self.get_pstate()
+                self.pstate_combo.set_active_id(initial_pstate_state)
+                self.pstate_combo.connect("changed", self.on_pstate_changed)
+
+                # Container for dynamic options
+                self.pstate_options_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+
+                # Pack components
+                pstate_box.pack_start(pstate_label, False, False, 0)
+                pstate_box.pack_end(self.pstate_combo, False, False, 0)
+                pstate_box.pack_end(self.pstate_options_box, False, False, 0)
+
+                tuning_content.pack_start(pstate_box, False, False, 0)
+
+                # Initial display based on current value
+                self.pstate_options_box.show_all()
+
+                ## P-State EPP configuration
+                pstateepp_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+                pstateepp_label = Gtk.Label(label="AMD P-State EPP Driver")
+                pstateepp_label.set_halign(Gtk.Align.START)
+
+                # Dropdown for P-State EPP options
+                self.pstateepp_combo = Gtk.ComboBoxText()
+                self.pstateepp_combo.append("performance", "performance")
+                self.pstateepp_combo.append("power", "power")
+                self.pstateepp_combo.append("balance_power", "balance_power")
+                self.pstateepp_combo.append("balance_performance", "balance_performance")
+
+                # Set initial value
+                initial_epp_state = self.get_pstateepp()
+                self.pstateepp_combo.set_active_id(initial_epp_state)
+                self.pstateepp_combo.connect("changed", self.on_pstateepp_changed)
+
+                # Container for dynamic options
+                self.pstateepp_options_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+
+                # Pack components
+                pstateepp_box.pack_start(pstateepp_label, False, False, 0)
+                pstateepp_box.pack_end(self.pstateepp_combo, False, False, 0)
+                pstateepp_box.pack_end(self.pstateepp_options_box, False, False, 0)
+
+                tuning_content.pack_start(pstateepp_box, False, False, 0)
+
+                # Initial display based on current value
+                self.pstateepp_options_box.show_all()
+
+
+                ## 3D V-Cache Optimizer
+                vcache_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+                vcache_label = Gtk.Label(label="3D V-Cache Optimizer")
+                vcache_label.set_markup("3D V-Cache Optimizer <i><small>(frequency-cache)</small></i>")
+                vcache_label.set_halign(Gtk.Align.START)
+
+                self.vcache_switch = Gtk.Switch()
+
+                # Set initial value
+                initial_vcache_state = self.get_vcache_state()
+                self.vcache_switch.set_active(initial_vcache_state)
+
+                # Connect switch to handler
+                self.vcache_switch.connect("state-set", self.on_vcache_switch_toggled)
+
+                vcache_box.pack_start(vcache_label, True, True, 0)
+                vcache_box.pack_end(self.vcache_switch, False, False, 0)
+
+                tuning_content.pack_start(vcache_box, False, False, 7)
+
+                # Disable feature, as is not used by this system
+                vcache_box.set_sensitive(False);
+
+
+                ## P-State Core Performance Boost
+                pstatecpb_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+                pstatecpb_label = Gtk.Label(label="P-State Core Performance Boost")
+                pstatecpb_label.set_markup("P-State Core Performance Boost")
+                pstatecpb_label.set_halign(Gtk.Align.START)
+
+                self.pstatecpb_switch = Gtk.Switch()
+
+                # Set initial value
+                initial_pstatecpb_state = self.get_pstatecpb_state()
+                self.pstatecpb_switch.set_active(initial_pstatecpb_state)
+
+                # Connect switch to handler
+                self.pstatecpb_switch.connect("state-set", self.on_pstatecpb_switch_toggled)
+
+                pstatecpb_box.pack_start(pstatecpb_label, True, True, 0)
+                pstatecpb_box.pack_end(self.pstatecpb_switch, False, False, 0)
+
+                tuning_content.pack_start(pstatecpb_box, False, False, 7)
+
+
+                ## Split Lock Mitigate
+                splitlock_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+                splitlock_label = Gtk.Label(label="Split Lock Mitigate")
+                splitlock_label.set_markup("Split Lock Mitigate <i><small>(default-patched)</small></i>")
+                splitlock_label.set_halign(Gtk.Align.START)
+
+                self.splitlock_switch = Gtk.Switch()
+
+                # Set initial value
+                initial_splitlock_state = self.get_splitlock_state()
+                self.splitlock_switch.set_active(initial_splitlock_state)
+
+                # Connect switch to handler
+                self.splitlock_switch.connect("state-set", self.on_splitlock_switch_toggled)
+
+                splitlock_box.pack_start(splitlock_label, True, True, 0)
+                splitlock_box.pack_end(self.splitlock_switch, False, False, 0)
+
+                tuning_content.pack_start(splitlock_box, False, False, 7)
+
+
+                ## ADIOS I/O Scheduler
+                adios_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+                adios_label = Gtk.Label(label="ADIOS I/O Scheduler")
+                adios_label.set_markup("ADIOS I/O Scheduler")
+                adios_label.set_halign(Gtk.Align.START)
+
+                self.adios_switch = Gtk.Switch()
+
+                # Set initial value
+                initial_adios_state = self.get_adios_state()
+                self.adios_switch.set_active(initial_adios_state)
+
+                # Connect switch to handler
+                self.adios_switch.connect("state-set", self.on_adios_switch_toggled)
+
+                adios_box.pack_start(adios_label, True, True, 0)
+                adios_box.pack_end(self.adios_switch, False, False, 0)
+
+                tuning_content.pack_start(adios_box, False, False, 7)
+
+                # Disable feature, as is not used by this system
+                adios_box.set_sensitive(False);
+
+            elif tab_name == "  GPU":
+                # Transparency Header
+                transparency_label = Gtk.Label()
+                transparency_label.set_markup("<small>The blur effect only affects terminals with transparency. 1.0 means\nno transparency</small>")
+                transparency_label.set_halign(Gtk.Align.START)
+
+                tuning_content.pack_start(transparency_label, False, False, 7)
+
+                # Terminal Transparency Configuration
+                term_opacity_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+                term_opacity_label = Gtk.Label()
+                term_opacity_label.set_markup("Terminal Transparency <i><small>(Range 0.1 - 1.0)</small></i>")
+                term_opacity_label.set_halign(Gtk.Align.START)
+
+                self.term_opacity_entry = Gtk.Entry()
+                self.term_opacity_entry.set_width_chars(5)
+                self.term_opacity_entry.set_max_length(4)
+
+                # Set initial value
+                initial_term_opacity = self.get_terminal_opacity()
+                self.term_opacity_entry.set_text(str(initial_term_opacity))
+
+                # Validation for numeric input
+                self.term_opacity_entry.connect("insert-text", self.on_terminal_opacity_insert)
+
+                term_opacity_apply_button = Gtk.Button(label="Apply")
+                term_opacity_apply_button.connect("clicked", self.on_apply_terminal_opacity)
+
+                term_opacity_box.pack_start(term_opacity_label, True, True, 0)
+                term_opacity_box.pack_end(term_opacity_apply_button, False, False, 0)
+                term_opacity_box.pack_end(self.term_opacity_entry, False, False, 0)
+
+                tuning_content.pack_start(term_opacity_box, False, False, 10)
+
+                # Encabezado Alacritty
+                alacritty_label = Gtk.Label()
+                alacritty_label.set_markup("<small>The following 2 options will change the appearance for both terminals,\nAlacritty and Kitty</small>")
+                alacritty_label.set_halign(Gtk.Align.START)
+
+                tuning_content.pack_start(alacritty_label, False, False, 7)
+
+                # Font Size Configuration
+                font_size_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+                font_size_label = Gtk.Label(label="Font Size")
+                font_size_label.set_halign(Gtk.Align.START)
+
+                self.font_size_entry = Gtk.Entry()
+                self.font_size_entry.set_width_chars(5)
+                self.font_size_entry.set_max_length(2)
+                self.font_size_entry.set_input_purpose(Gtk.InputPurpose.DIGITS)
+
+                # Set initial value
+                initial_font_size = self.get_font_size()
+                self.font_size_entry.set_text(str(initial_font_size))
+
+                # Validation for numeric input
+                self.font_size_entry.connect("insert-text", self.on_font_size_insert)
+
+                font_size_apply_button = Gtk.Button(label="Apply")
+                font_size_apply_button.connect("clicked", self.on_apply_font_size)
+
+                font_size_box.pack_start(font_size_label, True, True, 0)
+                font_size_box.pack_end(font_size_apply_button, False, False, 0)
+                font_size_box.pack_end(self.font_size_entry, False, False, 0)
+
+                tuning_content.pack_start(font_size_box, False, False, 7)
+
+                # Font Name Configuration
+                font_name_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
+                font_name_label = Gtk.Label(label="Font Name")
+                font_name_label.set_halign(Gtk.Align.START)
+
+                # Button to open font chooser dialog
+                font_chooser_button = Gtk.Button(label="Select")
+                font_chooser_button.connect("clicked", self.on_font_chooser_clicked)
+
+                # Entry for manual font name input
+                self.font_name_entry = Gtk.Entry()
+                self.font_name_entry.set_width_chars(20)
+
+                # Set initial value
+                initial_font_name = self.get_font_name()
+                self.font_name_entry.set_text(initial_font_name)
+
+                # Apply button
+                font_name_apply_button = Gtk.Button(label="Apply")
+                font_name_apply_button.connect("clicked", self.on_apply_font_name)
+
+                font_name_box.pack_start(font_name_label, True, True, 0)
+                font_name_box.pack_end(font_name_apply_button, False, False, 0)
+                font_name_box.pack_end(self.font_name_entry, False, False, 0)
+                font_name_box.pack_end(font_chooser_button, False, False, 0)
+
+                tuning_content.pack_start(font_name_box, False, False, 7)
+
+            elif tab_name == "󱐋  Power":
+                # Wall Engine Configuration
+                wall_engine_label = Gtk.Label(label="Wall Engine")
+                wall_engine_label.set_halign(Gtk.Align.START)
+
+                # Dropdown for Wall Engine options
+                self.wall_engine_combo = Gtk.ComboBoxText()
+                self.wall_engine_combo.append("Theme", "Default")
+                self.wall_engine_combo.append("CustomDir", "Custom Dir")
+                self.wall_engine_combo.append("CustomImage", "Custom Image")
+                self.wall_engine_combo.append("CustomAnimated", "Custom Animated")
+                self.wall_engine_combo.append("Slideshow", "SlideShow")
+
+                # Set initial value
+                initial_engine = self.get_wall_engine()
+                self.wall_engine_combo.set_active_id(initial_engine)
+                self.wall_engine_combo.connect("changed", self.on_wall_engine_changed)
+
+                # Container for dynamic options
+                self.wall_engine_options_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+
+                # Pack components
+                tuning_content.pack_start(wall_engine_label, False, False, 7)
+                tuning_content.pack_start(self.wall_engine_combo, False, False, 10)
+                tuning_content.pack_start(self.wall_engine_options_box, False, False, 7)
+
+                # Initial display based on current value
+                self.update_wall_engine_options(initial_engine)
+
+            else:
+                # A temporary label to display the content of each tab
+                placeholder = Gtk.Label(label=f"Conifg {tab_name}")
+                tuning_content.pack_start(placeholder, True, True, 0)
+
+            notebook.append_page(tuning_content, label)
+
+        tuning_options_content.pack_start(notebook, True, True, 0)
+
+        # Add content to the stack
+        self.content_stack.add_named(rice_options_content, "rice_options")
+        self.content_stack.add_named(tuning_options_content, "tuning_options")
+        self.content_stack.add_named(general_frame, "general_options")
+        self.content_stack.add_named(help_frame, "help")
+
+        # Main content container
+        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        content_box.pack_start(header, False, False, 0)
+        content_box.pack_start(self.content_stack, True, True, 0)
+
+        # Add side menu and content area to the main container
+        main_box.pack_start(sidebar, False, False, 0)
+        main_box.pack_start(content_box, True, True, 0)
+
+        # Connect menu buttons
+        sidebar.get_children()[1].connect("clicked", self.on_menu_clicked, "rice_options")
+        sidebar.get_children()[2].connect("clicked", self.on_menu_clicked, "tuning_options")
+        sidebar.get_children()[3].connect("clicked", self.on_menu_clicked, "general_options")
+        sidebar.get_children()[4].connect("clicked", self.on_menu_clicked, "help")
+
+        # Signal connection
+        self.connect("destroy", Gtk.main_quit)
+
+    def on_menu_clicked(self, button, page_name):
+        self.content_stack.set_visible_child_name(page_name)
+
+    def get_current_theme(self):
+        """
+        Read the .rice file to get the current theme
+        """
+        rice_file = os.path.expanduser('~/.config/bspwm/.rice')
+        try:
+            with open(rice_file, 'r') as f:
+                theme = f.read().strip()
+                return theme
+        except FileNotFoundError:
+            return "Topic not found"
+        except Exception as e:
+            print(f"Error reading the topic: {e}")
+            return "Error"
+
+    def get_border_width(self):
+        """
+        Read the border width from the theme settings file
+        """
+        current_theme = self.get_current_theme()
+        config_file = os.path.expanduser(f'~/.config/bspwm/rices/{current_theme}/theme-config.bash')
+        try:
+            with open(config_file, 'r') as f:
+                for line in f:
+                    if line.startswith('BORDER_WIDTH='):
+                        match = re.search(r'BORDER_WIDTH="(\d)"', line)
+                        if match:
+                            return int(match.group(1))
+        except FileNotFoundError:
+            print(f"Configuration file not found: {config_file}")
+        except Exception as e:
+            print(f"Error reading border width: {e}")
+        return 1  # Default value
+
+    def get_border_color(self, color_var):
+        """
+        Read the border color from the theme settings file
+        """
+        current_theme = self.get_current_theme()
+        config_file = os.path.expanduser(f'~/.config/bspwm/rices/{current_theme}/theme-config.bash')
+        try:
+            with open(config_file, 'r') as f:
+                for line in f:
+                    if line.startswith(f'{color_var}='):
+                        match = re.search(r'{color_var}="(#[0-9A-Fa-f]{{6}})"'.format(color_var=color_var), line)
+                        if match:
+                            return match.group(1)
+        except FileNotFoundError:
+            print(f"Configuration file not found: {config_file}")
+        except Exception as e:
+            print(f"Error reading border color: {e}")
+        return "#000000"  # Default value
+
+    def on_border_entry_insert(self, entry, new_text, new_text_length, position):
+        """
+        Default value: Validation to allow only numbers from 0 to 9
+        """
+        if not new_text.isdigit():
+            entry.stop_emission_by_name("insert-text")
+
+    def on_color_entry_insert(self, entry, new_text, new_text_length, position):
+        """
+        Validation to allow only hexadecimal characters and #
+        """
+        valid_chars = set('0123456789ABCDEFabcdef#')
+        for char in new_text:
+            if char not in valid_chars:
+                entry.stop_emission_by_name("insert-text")
+                return
+
+    def on_color_picked(self, color_button, entry):
+        """
+        Manages the color selection of the color picker
+        """
+        color = color_button.get_rgba()
+        hex_color = '#{:02x}{:02x}{:02x}'.format(
+            int(color.red * 255),
+            int(color.green * 255),
+            int(color.blue * 255)
+        )
+        entry.set_text(hex_color.upper())
+
+    def on_apply_border_width(self, button):
+        """
+        Apply the new border width
+        """
+        new_border_width = self.border_width_entry.get_text()
+
+        # Validate that the value is between 0 and 9
+        try:
+            width = int(new_border_width)
+            if 0 <= width <= 9:
+                # Update configuration file
+                current_theme = self.get_current_theme()
+                config_file = os.path.expanduser(f'~/.config/bspwm/rices/{current_theme}/theme-config.bash')
+
+                try:
+                    # Read the file
+                    with open(config_file, 'r') as f:
+                        content = f.readlines()
+
+                    # Modify the BORDER_WIDTH line
+                    for i, line in enumerate(content):
+                        if line.startswith('BORDER_WIDTH='):
+                            # Regex to preserve the comment and tabs
+                            match = re.match(r'(BORDER_WIDTH=)"(\d)"(\s*#.*)$', line)
+                            if match:
+                                content[i] = f'{match.group(1)}"{width}"{match.group(3)}\n'
+                            break
+
+                    # Write back to the file
+                    with open(config_file, 'w') as f:
+                        f.writelines(content)
+
+                    # Apply changes in real time
+                    subprocess.run(['bspc', 'config', 'border_width', str(width)], check=True)
+
+                except Exception as e:
+                    print(f"Error updating settings: {e}")
+            else:
+                print("Value out of range (0-9)")
+        except ValueError:
+            print("Invalid value")
+
+    def on_apply_border_color(self, button, color_var, bspc_config_key):
+        """
+        Apply the new border color
+        """
+        # Change here: directly use the correct attribute name
+        if color_var == 'NORMAL_BC':
+            new_color = self.normal_border_color_entry.get_text()
+        elif color_var == 'FOCUSED_BC':
+            new_color = self.focused_border_color_entry.get_text()
+
+        # The rest of the code remains the same
+        # Validate color format
+        if re.match(r'^#[0-9A-Fa-f]{6}$', new_color):
+            current_theme = self.get_current_theme()
+            config_file = os.path.expanduser(f'~/.config/bspwm/rices/{current_theme}/theme-config.bash')
+
+            try:
+                # Read the file
+                with open(config_file, 'r') as f:
+                    content = f.readlines()
+
+                # Modify the color line
+                for i, line in enumerate(content):
+                    if line.startswith(f'{color_var}='):
+                        # Regex to preserve the comment and tabs
+                        match = re.match(r'({color_var}=)"(#[0-9A-Fa-f]{{6}})"(\s*#.*)$'.format(color_var=color_var), line)
+                        if match:
+                            content[i] = f'{match.group(1)}"{new_color}"{match.group(3)}\n'
+                        break
+
+                # Write back to the file
+                with open(config_file, 'w') as f:
+                    f.writelines(content)
+
+                # Apply changes in real time
+                subprocess.run(['bspc', 'config', bspc_config_key, new_color], check=True)
+
+            except Exception as e:
+                print(f"Error updating settings: {e}")
+        else:
+            print("Error updating settings")
+
+    def get_corner_radius(self):
+        """
+        Read the corner radius from the theme configuration file
+        """
+        current_theme = self.get_current_theme()
+        config_file = os.path.expanduser(f'~/.config/bspwm/rices/{current_theme}/theme-config.bash')
+        try:
+            with open(config_file, 'r') as f:
+                for line in f:
+                    if line.startswith('P_CORNER_R='):
+                        match = re.search(r'P_CORNER_R="(\d+)"', line)
+                        if match:
+                            return int(match.group(1))
+        except FileNotFoundError:
+            print(f"Configuration file not found: {config_file}")
+        except Exception as e:
+            print(f"Error reading corner radius: {e}")
+        return 6  # Default value
+
+    def on_corner_radius_entry_insert(self, entry, new_text, new_text_length, position):
+        """
+        Validation to allow only numbers from 0 to 99
+        """
+        if not new_text.isdigit():
+            entry.stop_emission_by_name("insert-text")
+
+    def on_apply_corner_radius(self, button):
+        """
+        Apply the new corner radius
+        """
+        new_corner_radius = self.corner_radius_entry.get_text()
+
+        # Validate that the value is between 0 and 99
+        try:
+            radius = int(new_corner_radius)
+            if 0 <= radius <= 99:
+                # Update theme configuration file
+                current_theme = self.get_current_theme()
+                config_file = os.path.expanduser(f'~/.config/bspwm/rices/{current_theme}/theme-config.bash')
+                picom_config_file = os.path.expanduser('~/.config/bspwm/config/picom.conf')
+
+                try:
+                    # Read the topic file
+                    with open(config_file, 'r') as f:
+                        content = f.readlines()
+
+                    # Modify the P_CORNER_R line
+                    for i, line in enumerate(content):
+                        if line.startswith('P_CORNER_R='):
+                            match = re.match(r'(P_CORNER_R=)"(\d+)"(\s*#.*)$', line)
+                            if match:
+                                content[i] = f'{match.group(1)}"{radius}"{match.group(3)}\n'
+                            break
+
+                    # Write back to the theme file
+                    with open(config_file, 'w') as f:
+                        f.writelines(content)
+
+                    # Modify the first line of corner-radius in picom.conf
+                    with open(picom_config_file, 'r') as f:
+                        lines = f.readlines()
+
+                    for i, line in enumerate(lines):
+                        if 'corner-radius =' in line:
+                            lines[i] = f'corner-radius = {radius}\n'
+                            break
+
+                    # Write back to picom.conf
+                    with open(picom_config_file, 'w') as f:
+                        f.writelines(lines)
+
+                except Exception as e:
+                    print(f"Error updating settings: {e}")
+            else:
+                print("Value out of range (0-99)")
+        except ValueError:
+            print("Invalid value")
+
+    def get_shadows_state(self):
+        """
+        Read the current shadows state from the theme configuration file
+        """
+        current_theme = self.get_current_theme()
+        config_file = os.path.expanduser(f'~/.config/bspwm/rices/{current_theme}/theme-config.bash')
+        try:
+            with open(config_file, 'r') as f:
+                for line in f:
+                    if line.startswith('P_SHADOWS='):
+                        match = re.search(r'P_SHADOWS="(true|false)"', line)
+                        if match:
+                            return match.group(1) == 'true'
+        except FileNotFoundError:
+            print(f"Configuration file not found: {config_file}")
+        except Exception as e:
+            print(f"Error reading shadow state: {e}")
+        return False  # Default to False if not found
+
+    def on_shadows_switch_toggled(self, switch, state):
+        """
+        Handle shadows switch state changes
+        """
+        # Convert boolean state to string 'true' or 'false'
+        new_state = 'true' if state else 'false'
+
+        current_theme = self.get_current_theme()
+        config_file = os.path.expanduser(f'~/.config/bspwm/rices/{current_theme}/theme-config.bash')
+        picom_config_file = os.path.expanduser('~/.config/bspwm/config/picom.conf')
+
+        try:
+            # Update theme-config.bash
+            with open(config_file, 'r') as f:
+                content = f.readlines()
+
+            for i, line in enumerate(content):
+                if line.startswith('P_SHADOWS='):
+                    match = re.match(r'(P_SHADOWS=)"(true|false)"(\s*#.*)$', line)
+                    if match:
+                        content[i] = f'{match.group(1)}"{new_state}"{match.group(3)}\n'
+                    break
+
+            with open(config_file, 'w') as f:
+                f.writelines(content)
+
+            # Update picom.conf
+            with open(picom_config_file, 'r') as f:
+                lines = f.readlines()
+
+            for i, line in enumerate(lines):
+                if '#-shadow-switch' in line:
+                    # Preserve initial indentation
+                    match = re.match(r'(\s*)shadow\s*=\s*(true|false);(\s*)#-shadow-switch', line)
+                    if match:
+                        lines[i] = f'{match.group(1)}shadow = {new_state};{match.group(3)}#-shadow-switch\n'
+
+            with open(picom_config_file, 'w') as f:
+                f.writelines(lines)
+
+        except Exception as e:
+            print(f"Error updating shadow settings: {e}")
+
+        return False  # Must return False to allow switch state change
+
+    def get_shadow_color(self):
+        """
+        Read the shadow color from the theme configuration file
+        """
+        current_theme = self.get_current_theme()
+        config_file = os.path.expanduser(f'~/.config/bspwm/rices/{current_theme}/theme-config.bash')
+        try:
+            with open(config_file, 'r') as f:
+                for line in f:
+                    if line.startswith('SHADOW_C='):
+                        match = re.search(r'SHADOW_C="(#[0-9A-Fa-f]{6})"', line)
+                        if match:
+                            return match.group(1)
+        except FileNotFoundError:
+            print(f"Archivo de configuración no encontrado: {config_file}")
+        except Exception as e:
+            print(f"Error al leer el color de sombra: {e}")
+        return "#000000"  # Default color
+
+    def on_apply_shadow_color(self, button):
+        """
+        Apply the new shadow color
+        """
+        new_color = self.shadow_color_entry.get_text()
+
+        # Validate color format
+        if re.match(r'^#[0-9A-Fa-f]{6}$', new_color):
+            current_theme = self.get_current_theme()
+            config_file = os.path.expanduser(f'~/.config/bspwm/rices/{current_theme}/theme-config.bash')
+            picom_config_file = os.path.expanduser('~/.config/bspwm/config/picom.conf')
+
+            try:
+                # Read and update theme-config.bash
+                with open(config_file, 'r') as f:
+                    content = f.readlines()
+
+                # Modify the SHADOW_C line
+                for i, line in enumerate(content):
+                    if line.startswith('SHADOW_C='):
+                        match = re.match(r'(SHADOW_C=)"(#[0-9A-Fa-f]{6})"(\s*#.*)$', line)
+                        if match:
+                            content[i] = f'{match.group(1)}"{new_color}"{match.group(3)}\n'
+                        break
+
+                with open(config_file, 'w') as f:
+                    f.writelines(content)
+
+                # Update picom.conf
+                with open(picom_config_file, 'r') as f:
+                    lines = f.readlines()
+
+                # Modify the shadow-color line
+                for i, line in enumerate(lines):
+                    if line.strip().startswith('shadow-color ='):
+                        lines[i] = f'shadow-color = "{new_color}";\n'
+                        break
+
+                with open(picom_config_file, 'w') as f:
+                    f.writelines(lines)
+
+            except Exception as e:
+                print(f"Error updating shadow color settings: {e}")
+        else:
+            print("Invalid color")
+
+    def get_fadding_state(self):
+        """
+        Read the current fadding state from the theme configuration file
+        """
+        current_theme = self.get_current_theme()
+        config_file = os.path.expanduser(f'~/.config/bspwm/rices/{current_theme}/theme-config.bash')
+        try:
+            with open(config_file, 'r') as f:
+                for line in f:
+                    if line.startswith('P_FADE='):
+                        match = re.search(r'P_FADE="(true|false)"', line)
+                        if match:
+                            return match.group(1) == 'true'
+        except FileNotFoundError:
+            print(f"Configuration file not found: {config_file}")
+        except Exception as e:
+            print(f"Error reading fading state: {e}")
+        return False  # Default to False if not found
+
+    # Method for handling fading switch changes
+    def on_fadding_switch_toggled(self, switch, state):
+        """
+        Handle fadding switch state changes
+        """
+        # Convert boolean state to string 'true' or 'false'
+        new_state = 'true' if state else 'false'
+
+        current_theme = self.get_current_theme()
+        config_file = os.path.expanduser(f'~/.config/bspwm/rices/{current_theme}/theme-config.bash')
+        picom_config_file = os.path.expanduser('~/.config/bspwm/config/picom.conf')
+
+        try:
+            # Update theme-config.bash
+            with open(config_file, 'r') as f:
+                content = f.readlines()
+
+            for i, line in enumerate(content):
+                if line.startswith('P_FADE='):
+                    match = re.match(r'(P_FADE=)"(true|false)"(\s*#.*)$', line)
+                    if match:
+                        content[i] = f'{match.group(1)}"{new_state}"{match.group(3)}\n'
+                    break
+
+            with open(config_file, 'w') as f:
+                f.writelines(content)
+
+            # Update picom.conf
+            with open(picom_config_file, 'r') as f:
+                lines = f.readlines()
+
+            # Find and update all lines with #-fade-switch
+            for i, line in enumerate(lines):
+                if '#-fade-switch' in line:
+                    # Preserve initial indentation
+                    match = re.match(r'(\s*)fade\s*=\s*(true|false);(\s*)#-fade-switch', line)
+                    if match:
+                        lines[i] = f'{match.group(1)}fade = {new_state};{match.group(3)}#-fade-switch\n'
+
+            with open(picom_config_file, 'w') as f:
+                f.writelines(lines)
+
+        except Exception as e:
+            print(f"Error updating fading settings: {e}")
+
+        return False  # Must return False to allow switch state change
+
+    def get_blur_state(self):
+        """
+        Read the current state of the blur effect from the theme settings file
+        """
+        current_theme = self.get_current_theme()
+        config_file = os.path.expanduser(f'~/.config/bspwm/rices/{current_theme}/theme-config.bash')
+        try:
+            with open(config_file, 'r') as f:
+                for line in f:
+                    if line.startswith('P_BLUR='):
+                        match = re.search(r'P_BLUR="(true|false)"', line)
+                        if match:
+                            return match.group(1) == 'true'
+        except FileNotFoundError:
+            print(f"Configuration file not found: {config_file}")
+        except Exception as e:
+            print(f"Error reading the blur state: {e}")
+        return False  # Defaults to False if not found
+
+    def on_blur_switch_toggled(self, switch, state):
+        """
+        Manage changes in the blur switch
+        """
+        # Convert boolean state to 'true' or 'false' string
+        new_state = 'true' if state else 'false'
+
+        current_theme = self.get_current_theme()
+        config_file = os.path.expanduser(f'~/.config/bspwm/rices/{current_theme}/theme-config.bash')
+        picom_config_file = os.path.expanduser('~/.config/bspwm/config/picom.conf')
+
+        try:
+            # Actualizar theme-config.bash
+            with open(config_file, 'r') as f:
+                content = f.readlines()
+
+            for i, line in enumerate(content):
+                if line.startswith('P_BLUR='):
+                    match = re.match(r'(P_BLUR=)"(true|false)"(\s*#.*)$', line)
+                    if match:
+                        content[i] = f'{match.group(1)}"{new_state}"{match.group(3)}\n'
+                    break
+
+            with open(config_file, 'w') as f:
+                f.writelines(content)
+
+            # Update picom.conf
+            with open(picom_config_file, 'r') as f:
+                lines = f.readlines()
+
+            for i, line in enumerate(lines):
+                if '#-blur-switch' in line:
+                    # Preserve initial indentation
+                    match = re.match(r'(\s*)blur-background\s*=\s*(true|false);(\s*)#-blur-switch', line)
+                    if match:
+                        lines[i] = f'{match.group(1)}blur-background = {new_state};{match.group(3)}#-blur-switch\n'
+
+            with open(picom_config_file, 'w') as f:
+                f.writelines(lines)
+
+        except Exception as e:
+            print(f"Error updating blur settings: {e}")
+
+        return False  # It must return False to allow the switch state change
+
+    def get_animations_state(self):
+        """
+        Read the current animations state from the theme configuration file
+        """
+        current_theme = self.get_current_theme()
+        config_file = os.path.expanduser(f'~/.config/bspwm/rices/{current_theme}/theme-config.bash')
+        try:
+            with open(config_file, 'r') as f:
+                for line in f:
+                    if line.startswith('P_ANIMATIONS='):
+                        match = re.search(r'P_ANIMATIONS="(@|#)"', line)
+                        if match:
+                            return match.group(1) == '@'
+        except FileNotFoundError:
+            print(f"Configuration file not found: {config_file}")
+        except Exception as e:
+            print(f"Error reading animation status: {e}")
+        return False  # Default to False if not found
+
+    def on_animations_switch_toggled(self, switch, state):
+        """
+        Handle animations switch state changes
+        """
+        # Convert boolean state to string '@' or '#'
+        new_state = '@' if state else '#'
+
+        current_theme = self.get_current_theme()
+        config_file = os.path.expanduser(f'~/.config/bspwm/rices/{current_theme}/theme-config.bash')
+        picom_config_file = os.path.expanduser('~/.config/bspwm/config/picom.conf')
+
+        try:
+            # Update theme-config.bash
+            with open(config_file, 'r') as f:
+                content = f.readlines()
+
+            for i, line in enumerate(content):
+                if line.startswith('P_ANIMATIONS='):
+                    match = re.match(r'(P_ANIMATIONS=)"(@|#)"(\s*\s*#.*)$', line)
+                    if match:
+                        content[i] = f'{match.group(1)}"{new_state}"{match.group(3)}\n'
+                    break
+
+            with open(config_file, 'w') as f:
+                f.writelines(content)
+
+            # Update picom.conf
+            with open(picom_config_file, 'r') as f:
+                lines = f.readlines()
+
+            for i, line in enumerate(lines):
+                if 'include "picom-animations.conf"' in line:
+                    # Preserve initial indentation and swap activation/deactivation
+                    match = re.match(r'(\s*)([@#])include\s*"picom-animations\.conf"', line)
+                    if match:
+                        lines[i] = f'{match.group(1)}{new_state}include "picom-animations.conf"\n'
+
+            with open(picom_config_file, 'w') as f:
+                f.writelines(lines)
+
+        except Exception as e:
+            print(f"Error updating animation settings: {e}")
+
+        return False  # Must return False to allow switch state change
+
+    def get_terminal_opacity(self):
+        """
+        Read the terminal opacity value from the theme's configuration file.
+        """
+        current_theme = self.get_current_theme()
+        config_file = os.path.expanduser(f'~/.config/bspwm/rices/{current_theme}/theme-config.bash')
+        try:
+            with open(config_file, 'r') as f:
+                for line in f:
+                    if line.startswith('P_TERM_OPACITY='):
+                        match = re.search(r'P_TERM_OPACITY="([0-9.]+)"', line)
+                        if match:
+                            return float(match.group(1))
+        except FileNotFoundError:
+            print(f"Configuration file not found: {config_file}")
+        except Exception as e:
+            print(f"Error reading terminal opacity: {e}")
+        return 1.0  # Valor por defecto
+
+    def on_terminal_opacity_insert(self, entry, new_text, new_text_length, position):
+        """
+        Validation to allow only numbers, decimal points, and restrict to 0.1-1.0.
+        """
+        current_text = entry.get_text() + new_text
+        if not re.match(r'^([0-9]{0,1}(\.[0-9]{0,2})?|1(\.0{0,2})?)$', current_text):
+            entry.stop_emission_by_name("insert-text")
+
+    def on_apply_terminal_opacity(self, button):
+        """
+        Apply the new terminal opacity value.
+        """
+        new_opacity = self.term_opacity_entry.get_text()
+
+        # Validate that the value is between 0.1 and 1.0
+        try:
+            opacity = float(new_opacity)
+            if 0.1 <= opacity <= 1.0:
+                current_theme = self.get_current_theme()
+                config_file = os.path.expanduser(f'~/.config/bspwm/rices/{current_theme}/theme-config.bash')
+                picom_config_file = os.path.expanduser('~/.config/bspwm/config/picom.conf')
+
+                try:
+                    # Update theme configuration file
+                    with open(config_file, 'r') as f:
+                        content = f.readlines()
+
+                    for i, line in enumerate(content):
+                        if line.startswith('P_TERM_OPACITY='):
+                            match = re.match(r'(P_TERM_OPACITY=)"([0-9.]+)"(\s*#.*)$', line)
+                            if match:
+                                content[i] = f'{match.group(1)}"{opacity}"{match.group(3)}\n'
+                            break
+
+                    with open(config_file, 'w') as f:
+                        f.writelines(content)
+
+                    # Update picom.conf
+                    with open(picom_config_file, 'r') as f:
+                        lines = f.readlines()
+
+                    for i, line in enumerate(lines):
+                        if '#-term-opacity-switch' in line:
+                            match = re.match(r'(\s*)opacity\s*=\s*[0-9.]+;(\s*)#-term-opacity-switch', line)
+                            if match:
+                                lines[i] = f'{match.group(1)}opacity = {opacity};{match.group(2)}#-term-opacity-switch\n'
+
+                    with open(picom_config_file, 'w') as f:
+                        f.writelines(lines)
+
+                except Exception as e:
+                    print(f"Error updating settings: {e}")
+            else:
+                print("Value out of range (0.1 - 1.0)")
+        except ValueError:
+            print("Invalid value")
+
+    def get_font_size(self):
+        """
+        Read the font size from the theme's settings file.
+        """
+        current_theme = self.get_current_theme()
+        config_file = os.path.expanduser(f'~/.config/bspwm/rices/{current_theme}/theme-config.bash')
+        try:
+            with open(config_file, 'r') as f:
+                for line in f:
+                    if line.startswith('term_font_size='):
+                        match = re.search(r'term_font_size="(\d+)"', line)
+                        if match:
+                            return int(match.group(1))
+        except FileNotFoundError:
+            print(f"Configuration file not found: {config_file}")
+        except Exception as e:
+            print(f"Error reading font size: {e}")
+        return 10  # Default value
+
+    def on_font_size_insert(self, entry, new_text, new_text_length, position):
+        """
+        Validation to allow only numbers up to 2 digits.
+        """
+        if not new_text.isdigit() or len(entry.get_text() + new_text) > 2:
+            entry.stop_emission_by_name("insert-text")
+
+    def on_apply_font_size(self, button):
+        """
+        Apply the new font size in real time for Alacritty and Kitty.
+        """
+        new_font_size = self.font_size_entry.get_text()
+
+        try:
+            font_size = int(new_font_size)
+            if 1 <= font_size <= 99:
+                current_theme = self.get_current_theme()
+                config_file = os.path.expanduser(f'~/.config/bspwm/rices/{current_theme}/theme-config.bash')
+                alacritty_config_file = os.path.expanduser('~/.config/alacritty/fonts.toml')
+                kitty_config_file = os.path.expanduser('~/.config/kitty/kitty.conf')
+
+                try:
+                    # Update theme configuration file
+                    with open(config_file, 'r') as f:
+                        content = f.readlines()
+
+                    for i, line in enumerate(content):
+                        if line.startswith('term_font_size='):
+                            match = re.match(r'(term_font_size=)"(\d+)"(\s*#.*)?', line)
+                            if match:
+                                content[i] = f'{match.group(1)}"{font_size}"{match.group(3) or ""}\n'
+                            break
+
+                    with open(config_file, 'w') as f:
+                        f.writelines(content)
+
+                    # Update Alacritty configuration file
+                    with open(alacritty_config_file, 'r') as f:
+                        lines = f.readlines()
+
+                    for i, line in enumerate(lines):
+                        if line.strip().startswith('size ='):
+                            match = re.match(r'(\s*size\s*=\s*)(\d+)', line)
+                            if match:
+                                lines[i] = f'{match.group(1)}{font_size}\n'
+                            break
+
+                    with open(alacritty_config_file, 'w') as f:
+                        f.writelines(lines)
+
+                    # Update Kitty configuration file
+                    with open(kitty_config_file, 'r') as f:
+                        lines = f.readlines()
+
+                    for i, line in enumerate(lines):
+                        if line.strip().startswith('font_size'):
+                            match = re.match(r'(font_size\s+)(\d+)', line)
+                            if match:
+                                lines[i] = f'{match.group(1)}{font_size}\n'
+                            break
+
+                    with open(kitty_config_file, 'w') as f:
+                        f.writelines(lines)
+
+                except Exception as e:
+                    print(f"Error updating font size: {e}")
+            else:
+                print("Value out of range (1-99)")
+        except ValueError:
+            print("Invalid value")
+
+    def get_font_name(self):
+        """
+        Read the font name from the theme's configuration file.
+        """
+        current_theme = self.get_current_theme()
+        config_file = os.path.expanduser(f'~/.config/bspwm/rices/{current_theme}/theme-config.bash')
+        try:
+            with open(config_file, 'r') as f:
+                for line in f:
+                    if line.startswith('term_font_name='):
+                        match = re.search(r'term_font_name="([^"]+)"', line)
+                        if match:
+                            return match.group(1)
+        except FileNotFoundError:
+            print(f"Configuration file not found: {config_file}")
+        except Exception as e:
+            print(f"Error reading the font name: {e}")
+        return "monospace"  # Default value
+
+    def on_font_chooser_clicked(self, button):
+        """
+        Open a font selector to choose an installed font.
+        """
+        dialog = Gtk.FontChooserDialog(title="Select Font", parent=self)
+
+        response = dialog.run()
+        if response == Gtk.ResponseType.OK:
+            # It retrieves the selected source and updates the entry.
+            font_name = dialog.get_font_desc().get_family()
+            self.font_name_entry.set_text(font_name)
+
+        dialog.destroy()
+
+    def on_apply_font_name(self, button):
+        """
+        Apply the new font name in real time for Alacritty and Kitty.
+        """
+        new_font_name = self.font_name_entry.get_text()
+
+        if new_font_name:  # Validate that it is not empty
+            current_theme = self.get_current_theme()
+            config_file = os.path.expanduser(f'~/.config/bspwm/rices/{current_theme}/theme-config.bash')
+            alacritty_config_file = os.path.expanduser('~/.config/alacritty/fonts.toml')
+            kitty_config_file = os.path.expanduser('~/.config/kitty/kitty.conf')
+
+            try:
+                # Update theme configuration file
+                with open(config_file, 'r') as f:
+                    content = f.readlines()
+
+                for i, line in enumerate(content):
+                    if line.startswith('term_font_name='):
+                        match = re.match(r'(term_font_name=)"([^"]+)"(\s*#.*)?', line)
+                        if match:
+                            content[i] = f'{match.group(1)}"{new_font_name}"{match.group(3) or ""}\n'
+                            break
+
+                with open(config_file, 'w') as f:
+                    f.writelines(content)
+
+                # Update Alacritty configuration file
+                with open(alacritty_config_file, 'r') as f:
+                    lines = f.readlines()
+
+                for i, line in enumerate(lines):
+                    if line.strip().startswith('family ='):
+                        match = re.match(r'(\s*family\s*=\s*)"([^"]+)"', line)
+                        if match:
+                            lines[i] = f'{match.group(1)}"{new_font_name}"\n'
+                            break
+
+                with open(alacritty_config_file, 'w') as f:
+                    f.writelines(lines)
+
+                # Update Kitty configuration file
+                with open(kitty_config_file, 'r') as f:
+                    lines = f.readlines()
+
+                for i, line in enumerate(lines):
+                    if line.strip().startswith('font_family'):
+                        match = re.match(r'(font_family\s+)(.+)', line)
+                        if match:
+                            lines[i] = f'{match.group(1)}{new_font_name}\n'
+                            break
+
+                with open(kitty_config_file, 'w') as f:
+                    f.writelines(lines)
+
+            except Exception as e:
+                print(f"Error updating font name: {e}")
+        else:
+            print("The font name cannot be empty.")
+
+    def get_sudo_passwd(parent, message, title='Enter sudo password'):
+        # Returns user input as a string or None
+        # If user does not input text it returns None, NOT AN EMPTY STRING.
+        dialogWindow = Gtk.MessageDialog(parent,
+                              Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
+                              Gtk.MessageType.QUESTION,
+                              Gtk.ButtonsType.OK_CANCEL,
+                              message)
+
+        dialogWindow.set_title(title)
+
+        dialogBox = dialogWindow.get_content_area()
+        userEntry = Gtk.Entry()
+        userEntry.set_visibility(False)
+        userEntry.set_invisible_char("*")
+        userEntry.set_size_request(250,0)
+        dialogBox.pack_end(userEntry, False, False, 0)
+
+        dialogWindow.show_all()
+        response = dialogWindow.run()
+        text = userEntry.get_text() 
+        dialogWindow.destroy()
+        if (response == Gtk.ResponseType.OK) and (text != ''):
+            return text
+        else:
+            return None
+
+
+    ############################################################################################################
+    # P-state
+    ############################################################################################################
+
+    def get_pstate(self):
+        """
+        Get the current P-State Driver
+        """
+        cpu_file = os.path.expanduser('/sys/devices/system/cpu/amd_pstate/status')
+        try:
+            with open(cpu_file, 'r') as f:
+                state = f.readline()
+                if state:
+                    return state.split()[0]
+        except FileNotFoundError:
+            print(f"P-State Driver file not found")
+        except Exception as e:
+            print(f"Error reading ENGINE: {e}")
+        return "active"  # Default value
+
+    def on_pstate_changed(self, combo):
+        state = combo.get_active_id()
+        sudo_passwd = self.get_sudo_passwd('Enter sudo password')
+        try:
+            command = f'echo {state} | sudo tee /sys/devices/system/cpu/amd_pstate/status'
+            os.system('echo %s|sudo -S %s' % (sudo_passwd, command))
+            # sp = Popen(command , shell=True, stdin=PIPE)
+            # out, err = sp.communicate(sudo_passwd+'\n')   
+        except Exception as e:
+            print(f"Error applying P-State driver: {e}")
+
+    ############################################################################################################
+    # P-state EPP
+    ############################################################################################################
+
+    def get_pstateepp(self):
+        """
+        Get the current P-State EPP Driver
+        """
+        cpu_file = os.path.expanduser('/sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference')
+        try:
+            with open(cpu_file, 'r') as f:
+                state = f.readline()
+                if state:
+                    return state.split()[0]
+        except FileNotFoundError:
+            print(f"P-State EPP Driver file not found")
+        except Exception as e:
+            print(f"Error reading ENGINE: {e}")
+        return "performance"  # Default value
+
+    def on_pstateepp_changed(self, combo):
+        state = combo.get_active_id()
+        sudo_passwd = self.get_sudo_passwd('Enter sudo password')
+        try:
+            command = f'echo {state} | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference'
+            os.system('echo %s|sudo -S %s' % (sudo_passwd, command))
+            # sp = Popen(command , shell=True, stdin=PIPE)
+            # out, err = sp.communicate(sudo_passwd+'\n')   
+        except Exception as e:
+            print(f"Error applying P-State EPP driver: {e}")
+
+    ############################################################################################################
+    # AMD P-State Core Performance Boost
+    ############################################################################################################
+
+    def get_pstatecpb_state(self):
+        """
+        Read if Core Performance Boost is enabled
+        """
+        cpu_file = os.path.expanduser('/sys/devices/system/cpu/cpu0/cpufreq/boost')
+        try:
+            with open(cpu_file, 'r') as f:
+                state = f.readline()
+                if state:
+                    return state.split()[0]
+        except FileNotFoundError:
+            print(f"Core Performance Boost file not found")
+        except Exception as e:
+            print(f"Error reading DRIVER: {e}")
+        return False  # Default value
+
+    def on_pstatecpb_switch_toggled(self, switch, state):
+        """
+        Handle cpb switch state changes
+        """
+        # Convert boolean state to string 1 or 0
+        new_state = 1 if state else 0
+
+        sudo_passwd = self.get_sudo_passwd('Enter sudo password')
+        try:
+            command = f'echo {new_state} | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/boost'
+            os.system('echo %s|sudo -S %s' % (sudo_passwd, command))
+        except Exception as e:
+            print(f"Error applying P-State Core Performance Boost: {e}")
+        return False  # Must return False to allow switch state change
+
+    ############################################################################################################
+    # 3D V-Cache
+    ############################################################################################################
+
+    def get_vcache_state(self):
+        """
+        Read the current cache scheduling driver state
+        """
+        cpu_file = os.path.expanduser('/home/haiduk/amd_x3d_mode')
+        try:
+            with open(cpu_file, 'r') as f:
+                state = f.readline()
+                if state:
+                    return state.split()[0]
+        except FileNotFoundError:
+            print(f"3D V-Cache Driver file not found")
+        except Exception as e:
+            print(f"Error reading DRIVER: {e}")
+        return "Frequency"  # Default value
+
+    def on_vcache_switch_toggled(self, switch, state):
+        """
+        Handle 3dvcachce switch state changes
+        """
+        # Convert boolean state to string 'true' or 'false'
+        new_state = 'true' if state else 'false'
+
+        sudo_passwd = self.get_sudo_passwd('Enter sudo password')
+        try:
+            command = f'sudo echo {new_state} | sudo tee /home/haiduk/amd_x3d_mode'
+            os.system('echo %s|sudo -S %s' % (sudo_passwd, command))
+        except Exception as e:
+            print(f"Error applying 3D V-Cache driver: {e}")
+        return False  # Must return False to allow switch state change
+
+    ############################################################################################################
+    # Split Lock Mitigate
+    ############################################################################################################
+
+    def get_splitlock_state(self):
+        """
+        Read if Splitlock Mitigation is Enabled
+        """
+        cpu_file = os.path.expanduser('/etc/sysctl.d/99-splitlock.conf')
+        try:
+            with open(cpu_file, 'r') as f:
+                state = f.readline()
+                if "0" in state:
+                    return True
+                else:
+                    return False
+        except FileNotFoundError:
+            print(f"SplitLock Mitigation configuration file not found")
+        except Exception as e:
+            print(f"Error reading FILE: {e}")
+        return False  # Default value
+
+    def on_splitlock_switch_toggled(self, switch, state):
+        """
+        Handle splitlock switch state changes
+        """
+        # Convert boolean state to string 1 or 0
+        new_state = 0 if state else 1
+
+        sudo_passwd = self.get_sudo_passwd('Enter sudo password')
+        try:
+            command = f'sudo sysctl kernel.split_lock_mitigate={new_state}'
+            os.system('echo %s|sudo -S %s' % (sudo_passwd, command))
+        except Exception as e:
+            print(f"Error applying SplitLock Mitigate State: {e}")
+        return False  # Must return False to allow switch state change
+
+    ############################################################################################################
+    # ADIOS I/O Scheduler
+    ############################################################################################################
+
+    def get_adios_state(self):
+        """
+        Read if ADIOS is Enabled
+        """
+        cpu_file = os.path.expanduser('/sys/block/nvme0n1/queue/scheduler')
+        try:
+            with open(cpu_file, 'r') as f:
+                state = f.readline()
+                if "adios" in state:
+                    return True
+                else:
+                    return False
+        except FileNotFoundError:
+            print(f"Drive scheduler configuration file not found")
+        except Exception as e:
+            print(f"Error reading FILE: {e}")
+        return False  # Default value
+
+    def on_adios_switch_toggled(self, switch, state):
+        """
+        Handle ADIOS switch state changes
+        """
+        # Convert boolean state to string 1 or 0
+        new_state = 1 if state else 0
+
+        sudo_passwd = self.get_sudo_passwd('Enter sudo password')
+        try:
+            if new_state:
+                command = f'sync && echo adios | sudo tee /sys/block/<yourdrive>/queue/scheduler'
+            else:
+                command = f'sync' # TODO
+            os.system('echo %s|sudo -S %s' % (sudo_passwd, command))
+        except Exception as e:
+            print(f"Error applying ADIOS I/O Scheduler: {e}")
+        return False  # Must return False to allow switch state change
+
+    ############################################################################################################
+    # Wall Engine
+    ############################################################################################################
+
+    def get_wall_engine(self):
+        """
+        Read the value of the ENGINE variable from theme-config.bash.
+        """
+        current_theme = self.get_current_theme()
+        config_file = os.path.expanduser(f'~/.config/bspwm/rices/{current_theme}/theme-config.bash')
+        try:
+            with open(config_file, 'r') as f:
+                for line in f:
+                    if line.startswith('ENGINE='):
+                        match = re.search(r'ENGINE="([^"]+)"', line)
+                        if match:
+                            return match.group(1)
+        except FileNotFoundError:
+            print(f"Configuration file not found: {config_file}")
+        except Exception as e:
+            print(f"Error reading ENGINE: {e}")
+        return "Theme"  # Default value
+
+    def update_wall_engine_options(self, engine):
+        """
+        Displays dynamic options based on the current selection in the combo box.
+        """
+        for child in self.wall_engine_options_box.get_children():
+            self.wall_engine_options_box.remove(child)
+
+        if engine == "Theme":  # Default
+            current_theme = self.get_current_theme()
+            default_label = Gtk.Label(
+                label=(
+                    "Default option, it will put a random wallpaper from the\n"
+                    "Walls directory of the current theme, drop your images in\n"
+                    f"~/.config/bspwm/rices/{current_theme}/Walls"
+                )
+            )
+            default_label.set_halign(Gtk.Align.START)
+            default_label.set_justify(Gtk.Justification.LEFT)  # Align multiline to the left
+
+            apply_button = Gtk.Button(label="Apply")
+            apply_button.connect("clicked", self.on_apply_wall_engine, "Theme")
+
+            self.wall_engine_options_box.pack_start(default_label, False, False, 10)
+            self.wall_engine_options_box.pack_start(apply_button, False, False, 10)
+
+        elif engine == "CustomDir":  # Custom Directory
+            # Label for Custom Dir
+            custom_dir_label = Gtk.Label(
+                label="Select the directory from where you want to load the random\nimages"
+            )
+            custom_dir_label.set_halign(Gtk.Align.START)
+            custom_dir_label.set_justify(Gtk.Justification.LEFT)
+
+            # Entry and Buttons
+            custom_dir_entry = Gtk.Entry()
+            custom_dir_entry.set_text(self.get_custom_dir())
+
+            browse_button = Gtk.Button(label="Browse")
+            browse_button.connect("clicked", self.on_browse_directory, custom_dir_entry)
+
+            apply_button = Gtk.Button(label="Apply")
+            apply_button.connect("clicked", self.on_apply_wall_engine, "CustomDir", custom_dir_entry)
+
+            # Layout
+            hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            hbox.pack_start(custom_dir_entry, True, True, 0)
+            hbox.pack_end(browse_button, False, False, 0)
+            hbox.pack_end(apply_button, False, False, 0)
+
+            self.wall_engine_options_box.pack_start(custom_dir_label, False, False, 10)
+            self.wall_engine_options_box.pack_start(hbox, False, False, 10)
+
+        elif engine == "CustomImage":  # Custom Image
+            # Label for Custom Image
+            custom_image_label = Gtk.Label(
+                label="Select the image you want to use as wallpaper."
+            )
+            custom_image_label.set_halign(Gtk.Align.START)
+            custom_image_label.set_justify(Gtk.Justification.LEFT)
+
+            # Entry and Buttons
+            custom_image_entry = Gtk.Entry()
+            custom_image_entry.set_text(self.get_custom_wall())
+
+            browse_button = Gtk.Button(label="Browse")
+            browse_button.connect("clicked", self.on_browse_file, custom_image_entry)
+
+            apply_button = Gtk.Button(label="Apply")
+            apply_button.connect("clicked", self.on_apply_wall_engine, "CustomImage", custom_image_entry)
+
+            # Layout
+            hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            hbox.pack_start(custom_image_entry, True, True, 0)
+            hbox.pack_end(browse_button, False, False, 0)
+            hbox.pack_end(apply_button, False, False, 0)
+
+            self.wall_engine_options_box.pack_start(custom_image_label, False, False, 10)
+            self.wall_engine_options_box.pack_start(hbox, False, False, 10)
+
+        elif engine == "CustomAnimated":  # Custom Image
+            # Label for Custom Animated
+            custom_animated_label = Gtk.Label(
+                label="Select the file you want to use as wallpaper.\nValid files (mp4, mkv, gif)"
+            )
+            custom_animated_label.set_halign(Gtk.Align.START)
+            custom_animated_label.set_justify(Gtk.Justification.LEFT)
+
+            # Entry and Buttons
+            custom_animated_entry = Gtk.Entry()
+            custom_animated_entry.set_text(self.get_custom_animated())
+
+            browse_button = Gtk.Button(label="Browse")
+            browse_button.connect("clicked", self.on_browse_animated, custom_animated_entry)
+
+            apply_button = Gtk.Button(label="Apply")
+            apply_button.connect("clicked", self.on_apply_wall_engine, "CustomAnimated", custom_animated_entry)
+
+            # Layout
+            hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            hbox.pack_start(custom_animated_entry, True, True, 0)
+            hbox.pack_end(browse_button, False, False, 0)
+            hbox.pack_end(apply_button, False, False, 0)
+
+            self.wall_engine_options_box.pack_start(custom_animated_label, False, False, 10)
+            self.wall_engine_options_box.pack_start(hbox, False, False, 10)
+
+        elif engine == "Slideshow":  # Slideshow 15 minutes
+            current_theme = self.get_current_theme()
+            slideshow_label = Gtk.Label(
+                label=(
+                    "Change your wallpaper randomly every 15 minutes.\n"
+                    "From walls directory of the current theme, drop your images in\n"
+                    f"~/.config/bspwm/rices/{current_theme}/Walls"
+                )
+            )
+            slideshow_label.set_halign(Gtk.Align.START)
+            slideshow_label.set_justify(Gtk.Justification.LEFT)  # Alinear multilinea a la izquierda
+
+            apply_button = Gtk.Button(label="Apply")
+            apply_button.connect("clicked", self.on_apply_wall_engine, "Slideshow")
+
+            self.wall_engine_options_box.pack_start(slideshow_label, False, False, 10)
+            self.wall_engine_options_box.pack_start(apply_button, False, False, 10)
+
+        self.wall_engine_options_box.show_all()
+
+    def on_wall_engine_changed(self, combo):
+        engine = combo.get_active_id()
+        self.update_wall_engine_options(engine)
+
+    def get_custom_dir(self):
+        return self.read_theme_variable("CUSTOM_DIR")
+
+    def get_custom_wall(self):
+        return self.read_theme_variable("CUSTOM_WALL")
+
+    def get_custom_animated(self):
+        return self.read_theme_variable("CUSTOM_ANIMATED")
+
+    def read_theme_variable(self, var_name):
+        current_theme = self.get_current_theme()
+        config_file = os.path.expanduser(f'~/.config/bspwm/rices/{current_theme}/theme-config.bash')
+        try:
+            with open(config_file, 'r') as f:
+                for line in f:
+                    if line.startswith(f'{var_name}='):
+                        match = re.search(rf'{var_name}="([^"]+)"', line)
+                        if match:
+                            return match.group(1)
+        except FileNotFoundError:
+            print(f"Configuration file not found: {config_file}")
+        except Exception as e:
+            print(f"Error reading {var_name}: {e}")
+        return ""
+
+    def on_apply_wall_engine(self, button, engine, entry=None):
+        current_theme = self.get_current_theme()
+        config_file = os.path.expanduser(f'~/.config/bspwm/rices/{current_theme}/theme-config.bash')
+
+        try:
+            # Update configuration file
+            with open(config_file, 'r') as f:
+                content = f.readlines()
+
+            for i, line in enumerate(content):
+                if line.startswith('ENGINE='):
+                    content[i] = f'ENGINE="{engine}"\n'
+
+                if engine == "CustomDir" and line.startswith('CUSTOM_DIR='):
+                    content[i] = f'CUSTOM_DIR="{entry.get_text()}"\n'
+
+                if engine == "CustomImage" and line.startswith('CUSTOM_WALL='):
+                    content[i] = f'CUSTOM_WALL="{entry.get_text()}"\n'
+
+                if engine == "CustomAnimated" and line.startswith('CUSTOM_ANIMATED='):
+                    content[i] = f'CUSTOM_ANIMATED="{entry.get_text()}"\n'
+
+            with open(config_file, 'w') as f:
+                f.writelines(content)
+
+            # Apply changes in real time
+            command = ""
+            if engine == "Theme":
+                command = f'''
+                pkill xwinwrap;
+                [ -f /tmp/wall_refresh.pid ] && kill $(cat /tmp/wall_refresh.pid) 2>/dev/null;
+                rm -f /tmp/wall_refresh.pid;
+                feh -z --no-fehbg --bg-fill ~/.config/bspwm/rices/{current_theme}/walls
+                '''
+            elif engine == "CustomDir":
+                command = f'''
+                pkill xwinwrap;
+                [ -f /tmp/wall_refresh.pid ] && kill $(cat /tmp/wall_refresh.pid) 2>/dev/null;
+                rm -f /tmp/wall_refresh.pid;
+                feh -z --no-fehbg --bg-fill "{entry.get_text()}"
+                '''
+            elif engine == "CustomImage":
+                command = f'''
+                pkill xwinwrap;
+                [ -f /tmp/wall_refresh.pid ] && kill $(cat /tmp/wall_refresh.pid) 2>/dev/null;
+                rm -f /tmp/wall_refresh.pid;
+                feh --no-fehbg --bg-fill "{entry.get_text()}"
+                '''
+            elif engine == "CustomAnimated":
+                command = f'''
+                pkill xwinwrap;
+                [ -f /tmp/wall_refresh.pid ] && kill $(cat /tmp/wall_refresh.pid) 2>/dev/null;
+                rm -f /tmp/wall_refresh.pid;
+                AnimatedWall --start "{entry.get_text()}"
+                '''
+            elif engine == "Slideshow":
+                command = f'''
+                pkill xwinwrap;
+                [ -f /tmp/wall_refresh.pid ] && kill $(cat /tmp/wall_refresh.pid) 2>/dev/null;
+                rm -f /tmp/wall_refresh.pid;
+                bash -c '
+                    while true; do
+                        feh -z --no-fehbg --bg-fill ~/.config/bspwm/rices/{current_theme}/walls;
+                        sleep 900
+                    done & echo $! > /tmp/wall_refresh.pid
+                '
+                '''
+
+            subprocess.run(command, shell=True)
+
+        except Exception as e:
+            print(f"Error applying Wall Engine configuration: {e}")
+
+    def on_browse_directory(self, button, entry):
+        """
+        Error applying Wall Engine configuration
+        """
+        dialog = Gtk.FileChooserDialog(
+            title="Select Directory",
+            parent=self,
+            action=Gtk.FileChooserAction.SELECT_FOLDER,
+        )
+        dialog.add_buttons(
+            Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+            Gtk.STOCK_OPEN, Gtk.ResponseType.OK
+        )
+
+        response = dialog.run()
+        if response == Gtk.ResponseType.OK:
+            folder = dialog.get_filename()
+            entry.set_text(folder)
+
+        dialog.destroy()
+
+    def on_browse_file(self, button, entry):
+        """
+        Open a dialog to select a file and update the entry.
+        """
+        dialog = Gtk.FileChooserDialog(
+            title="Select Image File",
+            parent=self,
+            action=Gtk.FileChooserAction.OPEN,
+        )
+        dialog.add_buttons(
+            Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+            Gtk.STOCK_OPEN, Gtk.ResponseType.OK
+        )
+
+        # Image filter
+        filter_images = Gtk.FileFilter()
+        filter_images.set_name("Image Files")
+        filter_images.add_mime_type("image/png")
+        filter_images.add_mime_type("image/jpeg")
+        filter_images.add_mime_type("image/jpg")
+        filter_images.add_mime_type("image/webp")
+        filter_images.add_pattern("*.png")
+        filter_images.add_pattern("*.jpg")
+        filter_images.add_pattern("*.jpeg")
+        filter_images.add_pattern("*.webp")
+        dialog.add_filter(filter_images)
+
+        response = dialog.run()
+        if response == Gtk.ResponseType.OK:
+            file = dialog.get_filename()
+            entry.set_text(file)
+
+        dialog.destroy()
+
+    def on_browse_animated(self, button, entry):
+        """
+        Opens a dialog box to select a file and updates the entry.
+        """
+        dialog = Gtk.FileChooserDialog(
+            title="Select Image File",
+            parent=self,
+            action=Gtk.FileChooserAction.OPEN,
+        )
+        dialog.add_buttons(
+            Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+            Gtk.STOCK_OPEN, Gtk.ResponseType.OK
+        )
+
+        # Filtro para imágenes
+        filter_images = Gtk.FileFilter()
+        filter_images.set_name("Animated Files")
+        filter_images.add_mime_type("image/gif")
+        filter_images.add_mime_type("video/mp4")
+        filter_images.add_mime_type("video/mkv")
+        filter_images.add_pattern("*.gif")
+        filter_images.add_pattern("*.mp4")
+        filter_images.add_pattern("*.mkv")
+        dialog.add_filter(filter_images)
+
+        response = dialog.run()
+        if response == Gtk.ResponseType.OK:
+            file = dialog.get_filename()
+            entry.set_text(file)
+
+        dialog.destroy()
+
+    def get_picom_backend(self):
+        """
+        Read the current backend from picom.conf
+        """
+        picom_config_file = os.path.expanduser('~/.config/bspwm/config/picom.conf')
+
+        try:
+            with open(picom_config_file, 'r') as f:
+                for line in f:
+                    if line.strip().startswith('backend ='):
+                        match = re.search(r'backend\s*=\s*"(\w+)"', line)
+                        if match:
+                            return match.group(1)
+        except FileNotFoundError:
+            print(f"Configuration file not found: {picom_config_file}")
+        except Exception as e:
+            print(f"Error reading the picom backend: {e}")
+        return "xrender"  # Default value if not found
+
+    def on_apply_picom_backend(self, combo):
+        """
+        Apply the backend selected in picom.conf
+        """
+        selected_backend = combo.get_active_id()
+        picom_config_file = os.path.expanduser('~/.config/bspwm/config/picom.conf')
+
+        try:
+            with open(picom_config_file, 'r') as f:
+                lines = f.readlines()
+
+            for i, line in enumerate(lines):
+                if line.strip().startswith('backend ='):
+                    lines[i] = f'backend = "{selected_backend}";\n'
+                    break
+
+            with open(picom_config_file, 'w') as f:
+                f.writelines(lines)
+        except Exception as e:
+            print(f"Error updating picom backend: {e}")
+
+    def get_vsync_state(self):
+        """
+        Lee el estado actual de vSync desde picom.conf
+        """
+        picom_config_file = os.path.expanduser('~/.config/bspwm/config/picom.conf')
+
+        try:
+            with open(picom_config_file, 'r') as f:
+                for line in f:
+                    if line.strip().startswith('vsync ='):
+                        match = re.search(r'vsync\s*=\s*(true|false);', line)
+                        if match:
+                            return match.group(1) == "true"
+        except FileNotFoundError:
+            print(f"Configuration file not found: {picom_config_file}")
+        except Exception as e:
+            print(f"Error reading vSync status: {e}")
+        return False  # Default value if not found
+
+    def on_vsync_switch_toggled(self, switch, state):
+        """
+        Manages changes in the vSync switch
+        """
+        new_state = "true" if state else "false"
+        picom_config_file = os.path.expanduser('~/.config/bspwm/config/picom.conf')
+
+        try:
+            with open(picom_config_file, 'r') as f:
+                lines = f.readlines()
+
+            for i, line in enumerate(lines):
+                if line.strip().startswith('vsync ='):
+                    lines[i] = f'vsync = {new_state};\n'
+                    break
+
+            with open(picom_config_file, 'w') as f:
+                f.writelines(lines)
+        except Exception as e:
+            print(f"Error updating vSync status: {e}")
+
+        return False  # It must return False for the switch state to be updated
+
+    def get_window_gap(self):
+        """
+        Read the current value of window_gap from bspwmrc
+        """
+        bspwm_config_file = os.path.expanduser('~/.config/bspwm/bspwmrc')
+
+        try:
+            with open(bspwm_config_file, 'r') as f:
+                for line in f:
+                    if line.strip().startswith('bspc config window_gap'):
+                        match = re.search(r'bspc config window_gap (\d+)', line)
+                        if match:
+                            return int(match.group(1))
+        except FileNotFoundError:
+            print(f"Configuration file not found: {bspwm_config_file}")
+        except Exception as e:
+            print(f"Error reading window_gap: {e}")
+        return 0  # Default value if not found
+
+    def on_apply_window_gap(self, button):
+        """
+        Apply the new window_gap value.
+        """
+        new_gap = self.window_gap_entry.get_text()
+
+        # Validate that the value is between 0 and 20
+        try:
+            gap_value = int(new_gap)
+            if 0 <= gap_value <= 20:
+                bspwm_config_file = os.path.expanduser('~/.config/bspwm/bspwmrc')
+
+                try:
+                    # Read the bspwmrc file
+                    with open(bspwm_config_file, 'r') as f:
+                        lines = f.readlines()
+
+                    # Modify the window_gap line
+                    for i, line in enumerate(lines):
+                        if line.strip().startswith('bspc config window_gap'):
+                            lines[i] = f'bspc config window_gap {gap_value}\n'
+                            break
+
+                    # Write back to the bspwmrc file
+                    with open(bspwm_config_file, 'w') as f:
+                        f.writelines(lines)
+
+                    # Apply changes in real time
+                    subprocess.run(['bspc', 'config', 'window_gap', str(gap_value)], check=True)
+
+                except Exception as e:
+                    print(f"Error updating window_gap: {e}")
+            else:
+                print("Value out of range (0-20)")
+        except ValueError:
+            print("Invalid value")
+
+    # Input validation method
+    def on_window_gap_entry_insert(self, entry, new_text, new_text_length, position):
+        """
+        Validation to allow only up to two numeric characters
+        """
+        current_text = entry.get_text()
+
+        try:
+            # Simulate the full text after insertion
+            full_text = current_text[:position] + new_text + current_text[position:]
+            # Allow only numbers with a maximum of two characters
+            if not full_text.isdigit() or len(full_text) > 2:
+                entry.stop_emission_by_name("insert-text")
+        except ValueError:
+            entry.stop_emission_by_name("insert-text")
+
+    def get_pixel_art_state(self):
+        """
+        Read the current state of Pixel-Art on Terminal from .zshrc
+        """
+        zshrc_file = os.path.expanduser('~/.zshrc')
+
+        try:
+            with open(zshrc_file, 'r') as f:
+                for line in f:
+                    if "$HOME/.local/bin/colorscript -r" in line:
+                        return not line.strip().startswith("#")
+        except FileNotFoundError:
+            print(f"Configuration file not found: {zshrc_file}")
+        except Exception as e:
+            print(f"Error reading Pixel-Art state: {e}")
+        return False  # By default, it is assumed to be disabled.
+
+    def on_pixel_art_switch_toggled(self, switch, state):
+        """
+        Handles changes in the Pixel-Art on Terminal switch
+        """
+        zshrc_file = os.path.expanduser('~/.zshrc')
+        command_line = "$HOME/.local/bin/colorscript -r"
+
+        try:
+            with open(zshrc_file, 'r') as f:
+                lines = f.readlines()
+
+            for i, line in enumerate(lines):
+                if command_line in line:
+                    if state:
+                        # Activate: uncomment the line
+                        lines[i] = line.lstrip("#")
+                    else:
+                        # Deactivate: comment out the line
+                        if not line.strip().startswith("#"):
+                            lines[i] = f"#{line}"
+                    break
+
+            with open(zshrc_file, 'w') as f:
+                f.writelines(lines)
+        except Exception as e:
+            print(f"Error updating Pixel-Art on Terminal: {e}")
+
+        return False  # It must return False for the switch state to be updated
+
+    def get_fzf_tab_state(self):
+        """
+        Read the current state of fzf-tab on Terminal from .zshrc
+        """
+        zshrc_file = os.path.expanduser('~/.zshrc')
+
+        try:
+            with open(zshrc_file, 'r') as f:
+                for line in f:
+                    if "disable-fzf-tab" in line:
+                        return not line.strip().startswith("#")
+        except FileNotFoundError:
+            print(f"Configuration file not found: {zshrc_file}")
+        except Exception as e:
+            print(f"Error reading the state of fzf-tab: {e}")
+        return False  # By default, it is assumed to be disabled.
+
+    def on_fzf_tab_switch_toggled(self, switch, state):
+        """
+        Handles changes in the fzf_tab switch on Terminal
+        """
+        zshrc_file = os.path.expanduser('~/.zshrc')
+        command_line = "disable-fzf-tab"
+
+        try:
+            with open(zshrc_file, 'r') as f:
+                lines = f.readlines()
+
+            for i, line in enumerate(lines):
+                if command_line in line:
+                    if state:
+                        # Activate: uncomment the line
+                        lines[i] = line.lstrip("#")
+                    else:
+                        # Deactivate: comment out the line
+                        if not line.strip().startswith("#"):
+                            lines[i] = f"#{line}"
+                    break
+
+            with open(zshrc_file, 'w') as f:
+                f.writelines(lines)
+        except Exception as e:
+            print(f"Error al actualizar fzf-tab on Terminal: {e}")
+
+        return False  # It must return False for the switch state to be updated
+
+def main():
+    app = RiceEditorApp()
+    app.show_all()
+    Gtk.main()
+
+if __name__ == "__main__":
+    main()
